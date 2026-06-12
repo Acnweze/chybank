@@ -468,6 +468,11 @@ p {
   justify-content: space-between;
 }
 
+.balance-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .icon-button {
   background: rgba(255, 255, 255, 0.16);
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -746,6 +751,18 @@ p {
 .beneficiary span {
   color: #667363;
   font-size: 0.88rem;
+}
+
+.beneficiary-match {
+  align-items: center;
+  background: #e6f3e8;
+  border: 1px solid #c9e6ce;
+  border-radius: 8px;
+  color: #135d38;
+  display: inline-flex;
+  font-size: 0.84rem;
+  font-weight: 800;
+  padding: 9px 10px;
 }
 
 .two-column-form {

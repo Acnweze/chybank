@@ -37,7 +37,9 @@ import {
 } from "lucide-react";
 import "./styles.css";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:4000";
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  `${window.location.protocol}//${window.location.hostname}:4000`;
 const demoCredentials = {
   email: "sarah@chybank.demo",
   password: "Chybank@123"
@@ -45,6 +47,13 @@ const demoCredentials = {
 const passwordPattern = "^(?=.*[A-Za-z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,}$";
 const passwordRequirement =
   "Use at least 8 characters with letters, a number, and a special character.";
+
+function transactionPartyLabel(transaction) {
+  if (!transaction.counterpartyName) return "";
+  return transaction.direction === "incoming"
+    ? `From ${transaction.counterpartyName}`
+    : `To ${transaction.counterpartyName}`;
+}
 
 function money(value, currency = "USD", hidden = false) {
   if (hidden) return "••••••";
@@ -55,16 +64,30 @@ function money(value, currency = "USD", hidden = false) {
   }).format(value);
 }
 
+function accountNumber(value, hidden = false) {
+  const cleanValue = String(value || "");
+  if (!hidden) return cleanValue;
+  if (cleanValue.length <= 4) return "••••";
+  return `••••••${cleanValue.slice(-4)}`;
+}
+
 async function api(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
+  const isJson = response.headers.get("content-type")?.includes("application/json");
+  const data = text && isJson ? JSON.parse(text) : {};
 
   if (!response.ok) {
-    throw new Error(data.message || "Something went wrong.");
+    throw new Error(data.message || "The API server did not return a valid response.");
+  }
+
+  if (text && !isJson) {
+    throw new Error(
+      "The API request reached the wrong server. Check that the backend is running on port 4000."
+    );
   }
 
   return data;
@@ -302,10 +325,13 @@ function Dashboard({ initialUser, onLogout }) {
   const [cards, setCards] = useState([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [receiverAccountNumber, setReceiverAccountNumber] = useState("1002457892");
+  const [resolvedBeneficiary, setResolvedBeneficiary] = useState(null);
+  const [beneficiaryLookupStatus, setBeneficiaryLookupStatus] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [transferType, setTransferType] = useState("interbank");
   const [balanceHidden, setBalanceHidden] = useState(false);
+  const [accountNumbersHidden, setAccountNumbersHidden] = useState(false);
   const [newAccountType, setNewAccountType] = useState("Investment");
   const [investmentSubType, setInvestmentSubType] = useState("House Mortgage");
   const [profilePreview, setProfilePreview] = useState("");
@@ -477,6 +503,32 @@ function Dashboard({ initialUser, onLogout }) {
     loadTransactions().catch((transactionError) => setError(transactionError.message));
   }, [selectedAccountId]);
 
+  useEffect(() => {
+    const cleanAccountNumber = receiverAccountNumber.trim();
+
+    setResolvedBeneficiary(null);
+    setBeneficiaryLookupStatus("");
+
+    if (cleanAccountNumber.length < 10 || transferType === "other-bank") {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setBeneficiaryLookupStatus("Checking beneficiary...");
+      api(`/beneficiaries/${cleanAccountNumber}`)
+        .then((data) => {
+          setResolvedBeneficiary(data.beneficiary);
+          setBeneficiaryLookupStatus("");
+        })
+        .catch((lookupError) => {
+          setResolvedBeneficiary(null);
+          setBeneficiaryLookupStatus(lookupError.message);
+        });
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [receiverAccountNumber, transferType]);
+
   async function submitTransfer(event) {
     event.preventDefault();
     setError("");
@@ -579,7 +631,10 @@ function Dashboard({ initialUser, onLogout }) {
       const rows = transactionsForStatement.flatMap((transaction) => {
         const isCredit = transaction.direction === "incoming";
         const amount = moneyForStatement(transaction.amount);
-        const wrappedDescription = wrapLine(transaction.description || transaction.type);
+        const partyLabel = transactionPartyLabel(transaction);
+        const wrappedDescription = wrapLine(
+          `${partyLabel ? `${partyLabel} - ` : ""}${transaction.description || transaction.type}`
+        );
 
         return wrappedDescription.map((description, descriptionIndex) => ({
           date:
@@ -609,7 +664,10 @@ function Dashboard({ initialUser, onLogout }) {
         const contentId = pageId + 1;
         pageIds.push(`${pageId} 0 R`);
         const ops = [];
-        const accountNumber = selectedAccount?.accountNumber || "0000000000";
+        const statementAccountNumber = accountNumber(
+          selectedAccount?.accountNumber || "0000000000",
+          accountNumbersHidden
+        );
 
         ops.push(rectOp(0, 0, 612, 792, "0.98 0.99 0.97"));
         ops.push(rectOp(36, 720, 540, 58, "0.05 0.17 0.10"));
@@ -631,7 +689,7 @@ function Dashboard({ initialUser, onLogout }) {
         ops.push(textOp(`Email: ${user.email}`, 54, 611, 9));
         ops.push(textOp("Account Details", 326, 642, 11, "F2", "0.07 0.28 0.16"));
         ops.push(textOp(`Account: ${selectedAccount?.accountName || "Selected account"}`, 326, 625, 9));
-        ops.push(textOp(`Account No: ${accountNumber}`, 326, 611, 9));
+        ops.push(textOp(`Account No: ${statementAccountNumber}`, 326, 611, 9));
 
         ops.push(rectOp(42, 548, 570 - 42, 30, "0.92 0.96 0.91"));
         ops.push(textOp("Date", 52, 559, 9, "F2", "0.07 0.28 0.16"));
@@ -804,6 +862,14 @@ function Dashboard({ initialUser, onLogout }) {
           </span>
           <button
             className="ghost-button"
+            onClick={() => setBalanceHidden((current) => !current)}
+            type="button"
+          >
+            {balanceHidden ? <Eye size={18} /> : <EyeOff size={18} />}
+            {balanceHidden ? "Show balances" : "Hide balances"}
+          </button>
+          <button
+            className="ghost-button"
             onClick={() => setDarkMode((current) => !current)}
             type="button"
           >
@@ -900,14 +966,28 @@ function Dashboard({ initialUser, onLogout }) {
             <article className="balance-card">
               <div className="balance-head">
                 <span>Available balance</span>
-                <button
-                  className="icon-button"
-                  onClick={() => setBalanceHidden((current) => !current)}
-                  type="button"
-                  title={balanceHidden ? "Show balance" : "Hide balance"}
-                >
-                  {balanceHidden ? <Eye size={18} /> : <EyeOff size={18} />}
-                </button>
+                <div className="balance-actions">
+                  <button
+                    className="icon-button"
+                    onClick={() => setBalanceHidden((current) => !current)}
+                    type="button"
+                    title={balanceHidden ? "Show balance" : "Hide balance"}
+                  >
+                    {balanceHidden ? <Eye size={18} /> : <EyeOff size={18} />}
+                  </button>
+                  <button
+                    className="icon-button"
+                    onClick={() => setAccountNumbersHidden((current) => !current)}
+                    type="button"
+                    title={
+                      accountNumbersHidden
+                        ? "Show account numbers"
+                        : "Hide account numbers"
+                    }
+                  >
+                    <CreditCard size={18} />
+                  </button>
+                </div>
               </div>
               <strong>
                 {selectedAccount
@@ -916,7 +996,8 @@ function Dashboard({ initialUser, onLogout }) {
               </strong>
               <p>{selectedAccount?.accountName}</p>
               <small>
-                {selectedAccount?.currency} Account No. {selectedAccount?.accountNumber}
+                {selectedAccount?.currency} Account No.{" "}
+                {accountNumber(selectedAccount?.accountNumber, accountNumbersHidden)}
               </small>
             </article>
 
@@ -932,7 +1013,7 @@ function Dashboard({ initialUser, onLogout }) {
                     <option key={account.id} value={account.id}>
                       {account.accountType}
                       {account.accountSubType ? ` - ${account.accountSubType}` : ""} | Acct
-                      No. {account.accountNumber} |{" "}
+                      No. {accountNumber(account.accountNumber, accountNumbersHidden)} |{" "}
                       {money(account.balance, account.currency, balanceHidden)}
                     </option>
                   ))}
@@ -945,7 +1026,10 @@ function Dashboard({ initialUser, onLogout }) {
                   {selectedAccount.accountSubType ? (
                     <em>{selectedAccount.accountSubType}</em>
                   ) : null}
-                  <b>Account No. {selectedAccount.accountNumber}</b>
+                  <b>
+                    Account No.{" "}
+                    {accountNumber(selectedAccount.accountNumber, accountNumbersHidden)}
+                  </b>
                   <small>
                     {money(
                       selectedAccount.balance,
@@ -1077,6 +1161,9 @@ function Dashboard({ initialUser, onLogout }) {
                     <div>
                       <strong>{transaction.description}</strong>
                       <span>
+                        {transactionPartyLabel(transaction)
+                          ? `${transactionPartyLabel(transaction)} · `
+                          : ""}
                         {transaction.type} · {new Date(transaction.createdAt).toLocaleString()}
                       </span>
                     </div>
@@ -1103,11 +1190,12 @@ function Dashboard({ initialUser, onLogout }) {
                   value={selectedAccountId}
                   onChange={(event) => setSelectedAccountId(event.target.value)}
                 >
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.accountName} | {account.accountNumber}
-                    </option>
-                  ))}
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.accountName} |{" "}
+                        {accountNumber(account.accountNumber, accountNumbersHidden)}
+                      </option>
+                    ))}
                 </select>
               </label>
               <div className="transfer-type">
@@ -1135,6 +1223,14 @@ function Dashboard({ initialUser, onLogout }) {
                   onChange={(event) => setReceiverAccountNumber(event.target.value)}
                   inputMode="numeric"
                 />
+                {resolvedBeneficiary ? (
+                  <span className="beneficiary-match">
+                    Beneficiary: {resolvedBeneficiary.fullName}
+                  </span>
+                ) : null}
+                {!resolvedBeneficiary && beneficiaryLookupStatus ? (
+                  <span className="field-hint">{beneficiaryLookupStatus}</span>
+                ) : null}
               </label>
               <div className="two-column-form">
                 <label>
@@ -1191,7 +1287,7 @@ function Dashboard({ initialUser, onLogout }) {
                   type="button"
                 >
                   <strong>{beneficiary.name}</strong>
-                  <span>{beneficiary.accountNumber}</span>
+                  <span>{accountNumber(beneficiary.accountNumber, accountNumbersHidden)}</span>
                 </button>
               ))}
             </div>
@@ -1214,7 +1310,12 @@ function Dashboard({ initialUser, onLogout }) {
                   </div>
                   <div>
                     <strong>{transaction.description}</strong>
-                    <span>{new Date(transaction.createdAt).toLocaleString()}</span>
+                    <span>
+                      {transactionPartyLabel(transaction)
+                        ? `${transactionPartyLabel(transaction)} · `
+                        : ""}
+                      {new Date(transaction.createdAt).toLocaleString()}
+                    </span>
                   </div>
                   <b>
                     {transaction.direction === "incoming" ? "+" : "-"}

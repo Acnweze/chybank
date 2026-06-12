@@ -81,16 +81,21 @@ function toCard(row) {
 }
 
 function toTransaction(row, accountId) {
+  const direction = row.receiver_account_id === accountId ? "incoming" : "outgoing";
+
   return {
     id: row.id,
     senderAccountId: row.sender_account_id,
     receiverAccountId: row.receiver_account_id,
+    senderName: row.sender_name || "",
+    receiverName: row.receiver_name || "",
+    counterpartyName: direction === "incoming" ? row.sender_name || "" : row.receiver_name || "",
     amount: centsToDollars(row.amount_cents),
     type: row.type,
     status: row.status,
     description: row.description,
     createdAt: row.created_at,
-    direction: row.receiver_account_id === accountId ? "incoming" : "outgoing"
+    direction
   };
 }
 
@@ -644,6 +649,41 @@ export function getAccountsByUserId(userId) {
     .map(toAccount);
 }
 
+export function findBeneficiaryByAccountNumber(accountNumber) {
+  const cleanAccountNumber = String(accountNumber || "").trim();
+
+  if (!cleanAccountNumber) {
+    return { error: { status: 400, message: "Account number is required." } };
+  }
+
+  const account = db
+    .prepare(
+      `
+        SELECT
+          accounts.account_number,
+          accounts.account_name,
+          accounts.account_type,
+          users.full_name
+        FROM accounts
+        JOIN users ON users.id = accounts.user_id
+        WHERE accounts.account_number = ?
+      `
+    )
+    .get(cleanAccountNumber);
+
+  if (!account || account.account_type === "External") {
+    return { error: { status: 404, message: "No beneficiary found for this account number." } };
+  }
+
+  return {
+    beneficiary: {
+      accountNumber: account.account_number,
+      accountName: account.account_name,
+      fullName: account.full_name
+    }
+  };
+}
+
 export function createAccount({ userId, accountType, accountSubType }) {
   const investmentOptions = ["House Mortgage", "Car", "Child"];
   const accountOptions = {
@@ -766,9 +806,21 @@ export function getTransactionsByAccountId(accountId) {
   return db
     .prepare(
       `
-        SELECT *
+        SELECT
+          transactions.*,
+          sender_user.full_name AS sender_name,
+          receiver_user.full_name AS receiver_name
         FROM transactions
-        WHERE sender_account_id = ? OR receiver_account_id = ?
+        JOIN accounts AS sender_account
+          ON sender_account.id = transactions.sender_account_id
+        JOIN users AS sender_user
+          ON sender_user.id = sender_account.user_id
+        JOIN accounts AS receiver_account
+          ON receiver_account.id = transactions.receiver_account_id
+        JOIN users AS receiver_user
+          ON receiver_user.id = receiver_account.user_id
+        WHERE transactions.sender_account_id = ?
+          OR transactions.receiver_account_id = ?
         ORDER BY datetime(created_at) DESC
       `
     )

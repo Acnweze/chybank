@@ -5,6 +5,7 @@ import {
   createAccount,
   createServiceRequest,
   createTransfer,
+  findBeneficiaryByAccountNumber,
   findUserByCredentials,
   getAccountsByUserId,
   getCardsByUserId,
@@ -39,6 +40,7 @@ app.get("/", (req, res) => {
       resetPassword: "POST /auth/reset-password",
       accounts: "GET /accounts/:userId",
       createAccount: "POST /accounts",
+      beneficiaryLookup: "GET /beneficiaries/:accountNumber",
       transactions: "GET /transactions/:accountId",
       cards: "GET /cards/:userId",
       profileDocuments: "POST /profile/documents",
@@ -95,6 +97,16 @@ app.post("/auth/reset-password", (req, res) => {
 
 app.get("/accounts/:userId", (req, res) => {
   res.json({ accounts: getAccountsByUserId(req.params.userId) });
+});
+
+app.get("/beneficiaries/:accountNumber", (req, res) => {
+  const result = findBeneficiaryByAccountNumber(req.params.accountNumber);
+
+  if (result.error) {
+    return res.status(result.error.status).json({ message: result.error.message });
+  }
+
+  res.json(result);
 });
 
 app.post("/accounts", (req, res) => {

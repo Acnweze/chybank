@@ -5,7 +5,9 @@ import { DatabaseSync } from "node:sqlite";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const defaultDatabasePath = join(__dirname, "..", "data", "chybank.sqlite");
-const databasePath = process.env.SQLITE_DATABASE_PATH || defaultDatabasePath;
+const databasePath =
+  process.env.SQLITE_DATABASE_PATH ||
+  (process.env.VERCEL ? join("/tmp", "chybank.sqlite") : defaultDatabasePath);
 
 mkdirSync(dirname(databasePath), { recursive: true });
 

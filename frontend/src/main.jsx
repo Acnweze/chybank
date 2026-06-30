@@ -39,7 +39,9 @@ import "./styles.css";
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
-  `${window.location.protocol}//${window.location.hostname}:4000`;
+  (import.meta.env.PROD
+    ? "/api"
+    : `${window.location.protocol}//${window.location.hostname}:4000`);
 const demoCredentials = {
   email: "sarah@chybank.demo",
   password: "Chybank@123"

@@ -9,7 +9,6 @@ import {
   findUserByCredentials,
   getAccountsByUserId,
   getCardsByUserId,
-  getDatabasePath,
   getTransactionsByAccountId,
   initializeDatabase,
   registerUser,
@@ -22,10 +21,14 @@ dotenv.config();
 initializeDatabase();
 
 const app = express();
-const port = process.env.PORT || 4000;
 
 app.use(cors({ origin: true }));
 app.use(express.json());
+app.use((req, _res, next) => {
+  if (req.url === "/api") req.url = "/";
+  if (req.url.startsWith("/api/")) req.url = req.url.slice(4);
+  next();
+});
 
 app.get("/", (req, res) => {
   res.json({
@@ -157,7 +160,4 @@ app.post("/transfers", (req, res) => {
   res.status(201).json(result);
 });
 
-app.listen(port, () => {
-  console.log(`Chybank API running on http://localhost:${port}`);
-  console.log(`SQLite database: ${getDatabasePath()}`);
-});
+export default app;
